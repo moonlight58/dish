@@ -1,0 +1,126 @@
+#!/bin/bash
+
+OPTION_CLR=$'\033[38;5;12m'
+ERROR_CLR=$'\033[38;5;196m'
+RESET=$'\033[0m'
+
+cmdname=$(basename "$0")
+
+usage() {
+    echo -e "Usage: $cmdname [${OPTION_CLR}options...${RESET}]"
+    echo -e "    ${OPTION_CLR}-h${RESET}, ${OPTION_CLR}--help${RESET}     │ show this help message                           │"
+    echo -e "    ${OPTION_CLR}-i${RESET}, ${OPTION_CLR}--install${RESET}  │ install discord file accordingly to linux family │"
+    echo -e "    ${OPTION_CLR}-u${RESET}, ${OPTION_CLR}--update${RESET}   │ update discord accordingly to linux family       │"
+    echo -e "    ${OPTION_CLR}-v${RESET}, ${OPTION_CLR}--vencord${RESET}  │ launch Vencord CLI                               │"
+    echo -e "    ${OPTION_CLR}-d${RESET}, ${OPTION_CLR}--delete${RESET}   │ uninstall/delete discord from system             │"
+    echo -e "    ${OPTION_CLR}--verbose${RESET}      │ make the operation more talkative                │"
+}
+
+error() {
+    echo -e "${ERROR_CLR}Invalid option.${RESET} Use ${OPTION_CLR}-h${RESET} or ${OPTION_CLR}--help${RESET} for usage information."
+}
+
+no_arg() {
+    echo -e "${ERROR_CLR}No options provided.${RESET} Use ${OPTION_CLR}-h${RESET} or ${OPTION_CLR}--help${RESET} for usage information."
+}
+
+check_os() {
+    local id=""
+    local id_like=""
+
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        id="${ID,,}"
+        id_like="${ID_LIKE,,}"
+    elif [[ -f /usr/lib/os-release ]]; then
+        source /usr/lib/os-release
+        id="${ID,,}"
+        id_like="${ID_LIKE,,}"
+    fi
+
+    contains() { [[ "$1" == *"$2"* ]]; }
+
+    for field in "$id_like" "$id"; do
+        contains "$field" "debian" || contains "$field" "ubuntu"   && { echo "Debian-based";    return; }
+        contains "$field" "rhel"   || contains "$field" "fedora"   || contains "$field" "centos" && { echo "Red Hat-based"; return; }
+        contains "$field" "arch"   || contains "$field" "archlinux" && { echo "Arch-based";      return; }
+        contains "$field" "suse"   || contains "$field" "opensuse"  && { echo "SUSE-based";      return; }
+        contains "$field" "gentoo"    && { echo "Gentoo-based";    return; }
+        contains "$field" "slackware" && { echo "Slackware-based"; return; }
+    done
+}
+
+install_discord() {
+    echo "install_discord executed..."
+
+    local os
+    os=$(check_os)
+
+    local url format
+    if [[ "$os" == "Debian-based" ]]; then
+        format="deb"
+        url="https://discord.com/api/download?platform=linux&format=deb"
+    else
+        format="tar.gz"
+        url="https://discord.com/api/download?platform=linux&format=tar.gz"
+    fi
+
+    [[ "$do_verbose" == 1 ]] && wget "$url" -O "/tmp/discord.$format" || wget "$url" -q -O "/tmp/discord.$format"
+
+    # wget "$url" -O "/tmp/discord.$format"
+
+
+}
+
+update_discord() { echo "update_discord executed..."; }
+launch_vencord() { echo "launch_vencord executed..."; }
+delete_discord() { echo "delete_discord executed..."; }
+
+main() {
+
+    # if no arg, show no arg error message
+    if [ $# -eq 0 ]; then
+        no_arg
+        exit 0
+    fi
+
+    params="$(getopt --options hiuvd \
+                     --longoptions help,verbose,install,update,vencord,delete \
+                     --name "$cmdname" -- "$@")"
+
+    if [ $? -ne 0 ]; then
+        error
+        exit 1
+    fi
+
+    eval set -- "$params"
+    unset params
+
+    # flags
+    do_verbose=0
+    do_install=0
+    do_update=0
+    do_vencord=0
+    do_delete=0
+
+    # for specific order
+    while true; do
+        case $1 in
+            -h|--help) usage; exit 0 ;;
+            --verbose) do_verbose=1; shift;;
+            -i|--install) do_install=1; shift ;;
+            -u|--update) do_update=1;  shift ;;
+            -v|--vencord) do_vencord=1; shift ;;
+            -d|--delete) do_delete=1;  shift ;;
+            --) shift; break ;;
+            *) error; exit 1 ;;
+        esac
+    done
+
+    [ $do_install -eq 1 ] && install_discord
+    [ $do_update  -eq 1 ] && update_discord
+    [ $do_delete  -eq 1 ] && delete_discord
+    [ $do_vencord -eq 1 ] && launch_vencord
+}
+
+main "$@"
