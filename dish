@@ -65,11 +65,18 @@ install_discord() {
         url="https://discord.com/api/download?platform=linux&format=tar.gz"
     fi
 
+    # either do the install in verbose mode or not
     [[ "$do_verbose" == 1 ]] && wget "$url" -O "/tmp/discord.$format" || wget "$url" -q -O "/tmp/discord.$format"
 
-    # wget "$url" -O "/tmp/discord.$format"
+    # install the file accordingly to linux family
+    if [[ "$os" == "Debian-based" ]]; then
+        [[ "$do_verbose" == 1 ]] && sudo dpkg -i "/tmp/discord.$format" || sudo dpkg -i "/tmp/discord.$format" > /dev/null
+    else
+        [[ "$do_verbose" == 1 ]] && tar -xzf "/tmp/discord.$format" -C /opt/ || tar -xzf "/tmp/discord.$format" -C /opt/ > /dev/null
+        sudo ln -s /opt/Discord/Discord /usr/bin/discord
+    fi
 
-
+    rm "/tmp/discord.$format"
 }
 
 update_discord() { echo "update_discord executed..."; }
@@ -93,7 +100,9 @@ main() {
         exit 1
     fi
 
+    # avoid white space separation in args
     eval set -- "$params"
+    # flush all the params because everything is in #@
     unset params
 
     # flags
