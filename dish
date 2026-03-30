@@ -2,9 +2,19 @@
 
 OPTION_CLR=$'\033[38;5;12m'
 ERROR_CLR=$'\033[38;5;196m'
+SUCCESS_CLR=$'\033[38;5;40m'
+WARN_CLR=$'\033[38;5;214m'
+DIM_CLR=$'\033[38;5;245m'
 RESET=$'\033[0m'
 
 cmdname=$(basename "$0")
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# Print a message only when --verbose is active
+vlog() { [[ "$do_verbose" -eq 1 ]] && echo -e "${DIM_CLR}[verbose]${RESET} $*"; }
 
 usage() {
     echo -e "Usage: $cmdname [${OPTION_CLR}options...${RESET}]"
@@ -24,35 +34,104 @@ no_arg() {
     echo -e "${ERROR_CLR}No options provided.${RESET} Use ${OPTION_CLR}-h${RESET} or ${OPTION_CLR}--help${RESET} for usage information."
 }
 
+# ---------------------------------------------------------------------------
+# Dependency check
+# ---------------------------------------------------------------------------
+
+check_deps() {
+    vlog "Checking required dependencies..."
+    local missing=()
+    for dep in wget; do
+        if ! command -v "$dep" &>/dev/null; then
+            missing+=("$dep")
+        else
+            vlog "  ✔ $dep found at $(command -v "$dep")"
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${ERROR_CLR}Missing required dependencies:${RESET} ${missing[*]}"
+        echo "Please install them and try again."
+        exit 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# OS detection
+# ---------------------------------------------------------------------------
+
 check_os() {
-    local id=""
-    local id_like=""
+    local id="" id_like="" source_file=""
 
     if [[ -f /etc/os-release ]]; then
-        source /etc/os-release
-        id="${ID,,}"
-        id_like="${ID_LIKE,,}"
+        source_file="/etc/os-release"
     elif [[ -f /usr/lib/os-release ]]; then
-        source /usr/lib/os-release
+        source_file="/usr/lib/os-release"
+    fi
+
+    if [[ -n "$source_file" ]]; then
+        # shellcheck source=/dev/null
+        source "$source_file"
         id="${ID,,}"
         id_like="${ID_LIKE,,}"
+        vlog "OS detection: sourced $source_file"
+        vlog "OS detection: ID='$id'  ID_LIKE='$id_like'"
+    else
+        echo -e "${ERROR_CLR}Could not find /etc/os-release or /usr/lib/os-release.${RESET}" >&2
+        echo -e "Your distribution may not be supported." >&2
+        exit 1
     fi
 
     contains() { [[ "$1" == *"$2"* ]]; }
 
+    # NOTE: && has higher precedence than || in bash, so each multi-condition
+    # check must be grouped explicitly to work correctly.
     for field in "$id_like" "$id"; do
-        contains "$field" "debian" || contains "$field" "ubuntu"   && { echo "Debian-based";    return; }
-        contains "$field" "rhel"   || contains "$field" "fedora"   || contains "$field" "centos" && { echo "Red Hat-based"; return; }
-        contains "$field" "arch"   || contains "$field" "archlinux" && { echo "Arch-based";      return; }
-        contains "$field" "suse"   || contains "$field" "opensuse"  && { echo "SUSE-based";      return; }
-        contains "$field" "gentoo"    && { echo "Gentoo-based";    return; }
-        contains "$field" "slackware" && { echo "Slackware-based"; return; }
+        { contains "$field" "debian"    || contains "$field" "ubuntu";                              } && { vlog "Detected: Debian-based";    echo "Debian-based";    return; }
+        { contains "$field" "rhel"      || contains "$field" "fedora" || contains "$field" "centos";} && { vlog "Detected: Red Hat-based";   echo "Red Hat-based";   return; }
+        { contains "$field" "arch"      || contains "$field" "archlinux";                           } && { vlog "Detected: Arch-based";      echo "Arch-based";      return; }
+        { contains "$field" "suse"      || contains "$field" "opensuse";                            } && { vlog "Detected: SUSE-based";      echo "SUSE-based";      return; }
+        contains "$field" "gentoo"    && { vlog "Detected: Gentoo-based";    echo "Gentoo-based";    return; }
+        contains "$field" "slackware" && { vlog "Detected: Slackware-based"; echo "Slackware-based"; return; }
     done
+
+    echo -e "${ERROR_CLR}Unsupported Linux distribution (ID='$id').${RESET}" >&2
+    exit 1
 }
 
-install_discord() {
-    echo "install_discord executed..."
+# ---------------------------------------------------------------------------
+# Version helpers
+# ---------------------------------------------------------------------------
 
+# Returns the currently installed Discord version, or empty string if not installed
+get_installed_version() {
+    local os
+    os=$(check_os)
+
+    if [[ "$os" == "Debian-based" ]]; then
+        vlog "Reading installed version via dpkg..."
+        dpkg -s discord 2>/dev/null | grep '^Version:' | awk '{print $2}'
+    else
+        local build_info="/opt/Discord/resources/build_info.json"
+        vlog "Reading installed version from $build_info..."
+        if [[ -f "$build_info" ]]; then
+            grep -o '"version":"[^"]*"' "$build_info" | cut -d'"' -f4
+        fi
+    fi
+}
+
+# Returns the latest available Discord version from the API
+get_latest_version() {
+    local api_url="https://discord.com/api/updates/stable?platform=linux"
+    vlog "Fetching latest version from $api_url..."
+    wget -qO- "$api_url" | grep -o '"name":"[^"]*"' | cut -d'"' -f4
+}
+
+# ---------------------------------------------------------------------------
+# Install
+# ---------------------------------------------------------------------------
+
+install_discord() {
     local os
     os=$(check_os)
 
@@ -65,27 +144,180 @@ install_discord() {
         url="https://discord.com/api/download?platform=linux&format=tar.gz"
     fi
 
-    # either do the install in verbose mode or not
-    [[ "$do_verbose" == 1 ]] && wget "$url" -O "/tmp/discord.$format" || wget "$url" -q -O "/tmp/discord.$format"
+    local dest="/tmp/discord.$format"
+    echo "Downloading Discord ($format)..."
+    vlog "URL    : $url"
+    vlog "Dest   : $dest"
+    vlog "Distro : $os"
 
-    # install the file accordingly to linux family
-    if [[ "$os" == "Debian-based" ]]; then
-        [[ "$do_verbose" == 1 ]] && sudo dpkg -i "/tmp/discord.$format" || sudo dpkg -i "/tmp/discord.$format" > /dev/null
+    if [[ "$do_verbose" -eq 1 ]]; then
+        wget "$url" -O "$dest"
     else
-        [[ "$do_verbose" == 1 ]] && tar -xzf "/tmp/discord.$format" -C /opt/ || tar -xzf "/tmp/discord.$format" -C /opt/ > /dev/null
-        sudo ln -s /opt/Discord/Discord /usr/bin/discord
+        wget -q "$url" -O "$dest"
     fi
 
-    rm "/tmp/discord.$format"
+    if [[ $? -ne 0 ]]; then
+        echo -e "${ERROR_CLR}Download failed.${RESET} Check your internet connection."
+        rm -f "$dest"
+        exit 1
+    fi
+
+    vlog "Download complete. Installing..."
+
+    if [[ "$os" == "Debian-based" ]]; then
+        vlog "Running: sudo dpkg -i $dest"
+        if [[ "$do_verbose" -eq 1 ]]; then
+            sudo dpkg -i "$dest"
+        else
+            sudo dpkg -i "$dest" > /dev/null
+        fi
+    else
+        vlog "Extracting $dest to /opt/"
+        if [[ "$do_verbose" -eq 1 ]]; then
+            tar -xzvf "$dest" -C /opt/
+        else
+            tar -xzf "$dest" -C /opt/ > /dev/null
+        fi
+        vlog "Creating symlink: /usr/bin/discord → /opt/Discord/Discord"
+        sudo ln -sf /opt/Discord/Discord /usr/bin/discord
+    fi
+
+    vlog "Cleaning up $dest"
+    rm -f "$dest"
+    echo -e "${SUCCESS_CLR}Discord installed successfully.${RESET}"
 }
 
-update_discord() { echo "update_discord executed..."; }
-launch_vencord() { echo "launch_vencord executed..."; }
-delete_discord() { echo "delete_discord executed..."; }
+# ---------------------------------------------------------------------------
+# Update
+# ---------------------------------------------------------------------------
+
+update_discord() {
+    echo "Checking for Discord updates..."
+
+    local installed latest
+    installed=$(get_installed_version)
+
+    if [[ -z "$installed" ]]; then
+        echo -e "${ERROR_CLR}Discord does not appear to be installed.${RESET} Use ${OPTION_CLR}-i${RESET} to install it first."
+        exit 1
+    fi
+
+    latest=$(get_latest_version)
+
+    if [[ -z "$latest" ]]; then
+        echo -e "${ERROR_CLR}Could not reach Discord update API. Check your internet connection.${RESET}"
+        exit 1
+    fi
+
+    vlog "Installed version : $installed"
+    vlog "Latest version    : $latest"
+
+    if [[ "$installed" == "$latest" ]]; then
+        echo -e "${SUCCESS_CLR}Discord is already up to date${RESET} (${installed})."
+        return
+    fi
+
+    echo -e "${WARN_CLR}Update available:${RESET} $installed → $latest"
+    install_discord
+    echo -e "${SUCCESS_CLR}Discord updated to $latest.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Vencord
+# ---------------------------------------------------------------------------
+
+launch_vencord() {
+    local vencord_bin="$HOME/.local/bin/VencordInstallerCli"
+    local vencord_url="https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli-linux"
+
+    mkdir -p "$HOME/.local/bin"
+
+    if [[ ! -f "$vencord_bin" ]]; then
+        echo "VencordInstallerCli not found. Downloading..."
+        vlog "URL  : $vencord_url"
+        vlog "Dest : $vencord_bin"
+
+        if [[ "$do_verbose" -eq 1 ]]; then
+            wget "$vencord_url" -O "$vencord_bin"
+        else
+            wget -q "$vencord_url" -O "$vencord_bin"
+        fi
+
+        if [[ $? -ne 0 ]]; then
+            echo -e "${ERROR_CLR}Failed to download VencordInstallerCli.${RESET}"
+            rm -f "$vencord_bin"
+            exit 1
+        fi
+
+        chmod +x "$vencord_bin"
+        vlog "Marked $vencord_bin as executable"
+        echo -e "${SUCCESS_CLR}VencordInstallerCli downloaded.${RESET}"
+    else
+        vlog "VencordInstallerCli already present at $vencord_bin — skipping download"
+    fi
+
+    vlog "Launching: $vencord_bin"
+    "$vencord_bin"
+}
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+delete_discord() {
+    local os
+    os=$(check_os)
+
+    echo -e "${WARN_CLR}This will remove Discord and its symlink from your system.${RESET}"
+    read -rp "Also delete user config and data (~/.config/discord)? [y/N] " confirm_config
+
+    # Remove binary / package
+    if [[ "$os" == "Debian-based" ]]; then
+        # --purge removes package config files too, unlike -r
+        vlog "Running: sudo dpkg --purge discord"
+        if [[ "$do_verbose" -eq 1 ]]; then
+            sudo dpkg --purge discord
+        else
+            sudo dpkg --purge discord > /dev/null
+        fi
+    else
+        vlog "Removing /opt/Discord"
+        sudo rm -rf /opt/Discord
+    fi
+
+    # Remove symlink
+    if [[ -L /usr/bin/discord ]]; then
+        vlog "Removing symlink /usr/bin/discord"
+        sudo rm -f /usr/bin/discord
+        echo "Removed symlink /usr/bin/discord."
+    else
+        vlog "No symlink found at /usr/bin/discord — skipping"
+    fi
+
+    # Remove any leftover /tmp files
+    vlog "Cleaning up any leftover /tmp/discord.* files"
+    rm -f /tmp/discord.deb /tmp/discord.tar.gz
+
+    # Optionally remove user config
+    if [[ "${confirm_config,,}" == "y" || "${confirm_config,,}" == "yes" ]]; then
+        if [[ -d "$HOME/.config/discord" ]]; then
+            vlog "Removing $HOME/.config/discord"
+            rm -rf "$HOME/.config/discord"
+            echo "Removed ~/.config/discord."
+        else
+            vlog "~/.config/discord not found — nothing to remove"
+        fi
+    fi
+
+    echo -e "${SUCCESS_CLR}Discord has been uninstalled.${RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 main() {
 
-    # if no arg, show no arg error message
     if [ $# -eq 0 ]; then
         no_arg
         exit 0
@@ -100,31 +332,29 @@ main() {
         exit 1
     fi
 
-    # avoid white space separation in args
     eval set -- "$params"
-    # flush all the params because everything is in #@
     unset params
 
-    # flags
     do_verbose=0
     do_install=0
     do_update=0
     do_vencord=0
     do_delete=0
 
-    # for specific order
     while true; do
         case $1 in
-            -h|--help) usage; exit 0 ;;
-            --verbose) do_verbose=1; shift;;
+            -h|--help)    usage; exit 0 ;;
+            --verbose)    do_verbose=1; shift ;;
             -i|--install) do_install=1; shift ;;
-            -u|--update) do_update=1;  shift ;;
+            -u|--update)  do_update=1;  shift ;;
             -v|--vencord) do_vencord=1; shift ;;
-            -d|--delete) do_delete=1;  shift ;;
+            -d|--delete)  do_delete=1;  shift ;;
             --) shift; break ;;
             *) error; exit 1 ;;
         esac
     done
+
+    check_deps
 
     [ $do_install -eq 1 ] && install_discord
     [ $do_update  -eq 1 ] && update_discord
