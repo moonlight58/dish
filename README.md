@@ -16,6 +16,22 @@ A lightweight Linux helper script for installing, updating, launching Vencord, a
 - `sudo`
 - A supported Linux distribution: Debian/Ubuntu-based, Red Hat/Fedora-based, Arch-based, SUSE-based, Gentoo-based, or Slackware-based.
 
+## Installation
+To use the script, simply download it and make it executable:
+
+```bash
+wget https://raw.githubusercontent.com/moonlight58/dish/main/dish -O dish
+chmod +x dish
+```
+
+or clone the repository (recommended if you want to create a symbolic link for easier access):
+
+```bash
+git clone https://github.com/moonlight58/dish.git
+cd dish
+chmod +x dish
+```
+
 ## Usage
 
 ```bash
@@ -28,7 +44,7 @@ A lightweight Linux helper script for installing, updating, launching Vencord, a
 ```
 
 
-> [!TIP]
+> [!NOTE]
 > Since it's a personal script and not intended for distribution, it doesn't include error handling or support for all edge cases. Use it at your own risk and feel free to modify it to suit your needs!
 
 If you want to rock it on your daily system, you can create a symbolic link to the script in a directory that's in your `PATH`, such as `/usr/local/bin`:
