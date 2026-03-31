@@ -238,34 +238,8 @@ update_discord() {
 # ---------------------------------------------------------------------------
 
 launch_vencord() {
-    local vencord_bin="$HOME/.local/bin/VencordInstallerCli"
-    local vencord_url="https://github.com/Vencord/Installer/releases/latest/download/VencordInstallerCli-linux"
-
-    mkdir -p "$HOME/.local/bin"
-
-    if [[ ! -f "$vencord_bin" ]]; then
-        echo "VencordInstallerCli not found. Downloading..."
-        vlog "URL  : $vencord_url"
-        vlog "Dest : $vencord_bin"
-
-        local wget_flags=()
-        [[ "$do_verbose" -eq 0 ]] && wget_flags+=("-q")
-
-        if ! wget "${wget_flags[@]}" "$vencord_url" -O "$vencord_bin"; then
-            echo -e "${ERROR_CLR}Failed to download VencordInstallerCli.${RESET}"
-            rm -f "$vencord_bin"
-            exit 1
-        fi
-
-        chmod +x "$vencord_bin"
-        vlog "Marked $vencord_bin as executable"
-        echo -e "${SUCCESS_CLR}VencordInstallerCli downloaded.${RESET}"
-    else
-        vlog "VencordInstallerCli already present at $vencord_bin — skipping download"
-    fi
-
-    vlog "Launching: sudo $vencord_bin"
-    sudo "$vencord_bin"
+    # uses the bash script from vencord.dev, which handles installation if needed and then launches the CLI
+    sh -c "$(curl -sS https://vencord.dev/install.sh)"
 }
 
 # ---------------------------------------------------------------------------
