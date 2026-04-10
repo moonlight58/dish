@@ -57,7 +57,6 @@ Now you can run `dish` from anywhere in your terminal!
 
 ```bash
 dish --install
-...
 ```
 
 ## Options
